@@ -3,12 +3,29 @@ import re
 import requests
 import pandas as pd
 
-# --- BIOLOGICAL LOGIC & MOCK DATABASE ---
-DOMAIN_DB = {
-    "SH3": {"name": "SH3 Domain", "desc": "Involved in protein-protein interactions.", "function": "Signaling"},
-    "KINASE": {"name": "Protein Kinase Domain", "desc": "Catalytic domain for phosphate transfer.", "function": "Enzymatic Activity"},
-    "WD40": {"name": "WD40 Repeat", "desc": "Scaffold for multi-protein complex assembly.", "function": "Structural"},
-    "HEME": {"name": "Heme-binding Site", "desc": "Binding site for iron-containing porphyrins.", "function": "Metabolism"}
+# --- BIOLOGICAL LOGIC & MOTIF DATABASE ---
+# Updated to use Regex patterns for real biological domain detection
+DOMAIN_PATTERNS = {
+    "KINASE": {
+        "pattern": r"G.G..G",  # Simplified Glycine-rich loop (P-loop) common in Kinases
+        "name": "Protein Kinase Motif",
+        "function": "Enzymatic Activity (Phosphate Transfer)"
+    },
+    "SH3": {
+        "pattern": r"P..P",    # Proline-rich motif often recognized by SH3 domains
+        "name": "SH3-Binding Motif",
+        "function": "Protein-Protein Interaction"
+    },
+    "WD40": {
+        "pattern": r"GH.{20,30}WD", # Classic GH...WD repeat structure
+        "name": "WD40 Repeat",
+        "function": "Scaffold / Multi-protein Assembly"
+    },
+    "N-GLYCO": {
+        "pattern": r"N[^P][ST][^P]", # N-glycosylation consensus: N-X-S/T
+        "name": "Glycosylation Site",
+        "function": "Cell Signaling / Stability"
+    }
 }
 
 def analyze_sequence(sequence):
@@ -17,54 +34,64 @@ def analyze_sequence(sequence):
         sequence = "".join(sequence.splitlines()[1:])
     
     if not re.match(r'^[ACDEFGHIKLMNPQRSTVWY]+$', sequence):
-        return {"error": "Invalid characters found in sequence. Please use standard amino acid codes."}
+        return {"error": "Invalid characters found. Please use standard amino acid codes."}
 
+    # 1. PTM Identification
     ptms = []
     for i, amino_acid in enumerate(sequence):
         pos = i + 1
         if amino_acid in ['S', 'T', 'Y']:
             ptms.append({"Type": "Phosphorylation", "Residue": amino_acid, "Position": pos})
-        if amino_acid == 'N' and i + 2 < len(sequence):
-            if sequence[i+2] in ['S', 'T'] and sequence[i+1] != 'P':
-                ptms.append({"Type": "N-glycosylation", "Residue": amino_acid, "Position": pos})
         if amino_acid == 'K':
             ptms.append({"Type": "Acetylation/Ubiquitination", "Residue": amino_acid, "Position": pos})
 
+    # 2. Domain/Motif Identification (Using Regex Search)
     found_domains = []
-    for motif, info in DOMAIN_DB.items():
-        if motif in sequence:
-            start = sequence.find(motif) + 1
+    for key, info in DOMAIN_PATTERNS.items():
+        matches = re.finditer(info["pattern"], sequence)
+        for match in matches:
             found_domains.append({
                 "Domain Name": info["name"],
-                "Start": start,
-                "End": start + len(motif) - 1,
+                "Start": match.start() + 1,
+                "End": match.end(),
                 "Function": info["function"]
             })
 
+    # 3. Functional Summary Logic
     if not found_domains:
-        summary = "No known domains identified. Protein might be intrinsically disordered."
+        summary = "No recognized domains found. The protein may be intrinsically disordered or highly novel."
     else:
-        summary = f"This protein contains {len(found_domains)} identified domains. "
-        summary += "Primary functions include: " + ", ".join(set(d['Function'] for d in found_domains)) + "."
+        # Collect unique functions
+        unique_funcs = list(set(d['Function'] for d in found_domains))
+        summary = f"Identified {len(found_domains)} structural/functional markers. "
+        summary += f"This suggests roles in: {', '.join(unique_funcs)}."
 
     return {"ptms": ptms, "domains": found_domains, "summary": summary}
 
 # --- STREAMLIT INTERFACE ---
-st.set_page_config(page_title="Protein Analyzer", page_icon="🧬")
+st.set_page_config(page_title="Protein Profiler", page_icon="🧬", layout="wide")
 
 st.title("🧬 Post-Translational Protein Analyzer")
-st.markdown("Predict PTMs and identify functional domains from sequences or UniProt IDs.")
+st.markdown("Analyze protein sequences for PTMs and conserved functional motifs.")
+
+# Sidebar for example data
+st.sidebar.header("Test Sequences")
+if st.sidebar.button("Load Human p53 (Partial)"):
+    st.session_state.seq = "MEEPQSDPSVEPPLSQETFSDLWKLLPENNVLSPLPSQAMDDLMLSPDDI"
+if st.sidebar.button("Load Src Kinase Segment"):
+    st.session_state.seq = "YVAPSDPLAGGVTTFVALYDYESRTETDLSFKKGERLQIVNNTEGDWWLAHSLSTGQTGYIPSNYVAPSD"
 
 # Input Section
-seq_input = st.text_area("Input Protein Sequence:", placeholder="e.g., MKWVTFISLLKINASEK")
-uni_input = st.text_input("Optional: UniProt ID:", placeholder="e.g., P04637")
+seq_input = st.text_area("Input Protein Sequence:", 
+                         value=st.session_state.get('seq', ''),
+                         placeholder="Paste amino acids here...")
+uni_input = st.text_input("OR Enter UniProt ID:", placeholder="e.g., P04637")
 
-if st.button("Analyze Protein"):
+if st.button("Run Full Analysis"):
     sequence = seq_input.strip()
     
-    # UniProt Fetching Logic
     if uni_input and not sequence:
-        with st.spinner("Fetching from UniProt..."):
+        with st.spinner("Accessing UniProt Database..."):
             try:
                 resp = requests.get(f"https://rest.uniprot.org/uniprotkb/{uni_input}.fasta")
                 if resp.status_code == 200:
@@ -72,7 +99,7 @@ if st.button("Analyze Protein"):
                 else:
                     st.error("UniProt ID not found.")
             except:
-                st.error("Connection to UniProt failed.")
+                st.error("UniProt API connection failed.")
 
     if sequence:
         result = analyze_sequence(sequence)
@@ -80,26 +107,26 @@ if st.button("Analyze Protein"):
         if "error" in result:
             st.error(result["error"])
         else:
-            # Display Results
-            st.success("Analysis Complete!")
+            st.success("Analysis Successfully Executed")
             
+            # Use columns for layout
             col1, col2 = st.columns(2)
             
             with col1:
-                st.subheader("Predicted PTMs")
+                st.subheader("📍 Predicted PTM Sites")
                 if result["ptms"]:
-                    st.table(pd.DataFrame(result["ptms"]))
+                    st.dataframe(pd.DataFrame(result["ptms"]), use_container_width=True)
                 else:
-                    st.info("No PTMs predicted.")
+                    st.info("No common PTM sites predicted.")
 
             with col2:
-                st.subheader("Identified Domains")
+                st.subheader("🏗️ Identified Domains & Motifs")
                 if result["domains"]:
-                    st.table(pd.DataFrame(result["domains"]))
+                    st.dataframe(pd.DataFrame(result["domains"]), use_container_width=True)
                 else:
-                    st.info("No domains identified.")
+                    st.info("No functional domains identified.")
 
-            st.subheader("Functional Summary")
+            st.subheader("📝 Functional Summary")
             st.info(result["summary"])
     else:
-        st.warning("Please provide a sequence or UniProt ID.")
+        st.warning("Please enter a sequence or ID to begin.")
