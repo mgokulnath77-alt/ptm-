@@ -2,6 +2,7 @@ import streamlit as st
 import re
 import requests
 import pandas as pd
+import plotly.graph_objects as go
 
 # --- BIOLOGICAL LOGIC & MOTIF DATABASE ---
 DOMAIN_PATTERNS = {
@@ -177,4 +178,3 @@ if st.button("Run Full Analysis", type="primary"):
                     st.info("No functional motifs identified.")
     else:
         st.warning("Please provide a protein sequence or a UniProt ID.")
-
