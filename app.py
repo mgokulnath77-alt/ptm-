@@ -6,39 +6,39 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 # --- BIOLOGICAL LOGIC & MOTIF DATABASE ---
+# Added colors for the domain mapping
 DOMAIN_PATTERNS = {
     "KINASE": {
         "pattern": r"G.G..G",  
         "name": "Protein Kinase Motif",
-        "function": "Enzymatic Activity (Phosphate Transfer)",
+        "function": "Enzymatic Activity",
         "color": "#FF4B4B"
     },
     "SH3": {
         "pattern": r"P..P",    
         "name": "SH3-Binding Motif",
-        "function": "Protein-Protein Interaction",
+        "function": "Protein Interaction",
         "color": "#1C83E1"
     },
     "WD40": {
         "pattern": r"GH.{20,30}WD", 
         "name": "WD40 Repeat",
-        "function": "Scaffold / Multi-protein Assembly",
+        "function": "Scaffolding",
         "color": "#00C04A"
     },
     "N-GLYCO": {
         "pattern": r"N[^P][ST][^P]", 
         "name": "Glycosylation Site",
-        "function": "Cell Signaling / Stability",
+        "function": "Cell Signaling",
         "color": "#FFAA00"
     }
 }
 
 def analyze_sequence(sequence):
+    # Clean sequence: remove numbers, spaces, and FASTA headers
     sequence = sequence.upper().strip()
     if sequence.startswith(">"):
         sequence = "".join(sequence.splitlines()[1:])
-    
-    # Remove any whitespace or numbers often found in FASTA/GenBank
     sequence = re.sub(r"[\s\d]", "", sequence)
 
     if not re.match(r'^[ACDEFGHIKLMNPQRSTVWY]+$', sequence):
@@ -51,7 +51,7 @@ def analyze_sequence(sequence):
         if amino_acid in ['S', 'T', 'Y']:
             ptms.append({"Type": "Phosphorylation", "Residue": amino_acid, "Position": pos})
         if amino_acid == 'K':
-            ptms.append({"Type": "Acetylation/Ubiquitination", "Residue": amino_acid, "Position": pos})
+            ptms.append({"Type": "Acetylation", "Residue": amino_acid, "Position": pos})
 
     # 2. Domain/Motif Identification
     found_domains = []
@@ -66,119 +66,100 @@ def analyze_sequence(sequence):
                 "Color": info["color"]
             })
 
-    # 3. Summary
-    if not found_domains:
-        summary = "No recognized domains found. The protein may be intrinsically disordered or highly novel."
-    else:
-        unique_funcs = list(set(d['Function'] for d in found_domains))
-        summary = f"Identified {len(found_domains)} structural/functional markers. Roles in: {', '.join(unique_funcs)}."
+    return {"ptms": ptms, "domains": found_domains, "length": len(sequence), "seq": sequence}
 
-    return {"ptms": ptms, "domains": found_domains, "summary": summary, "length": len(sequence)}
-
-def plot_domain_map(domains, seq_length):
-    """Generates a visual map of the protein domains."""
+# --- DOMAIN MAPPING VISUALIZATION ---
+def draw_domain_map(domains, seq_length):
     fig = go.Figure()
 
-    # Draw the backbone of the protein
+    # Draw the main protein backbone
     fig.add_trace(go.Scatter(
         x=[1, seq_length], y=[0, 0],
         mode="lines",
-        line=dict(color="lightgrey", width=10),
-        name="Protein Backbone",
+        line=dict(color="#E5ECF6", width=20),
+        name="Protein Chain",
         hoverinfo="skip"
     ))
 
-    # Add each domain as a colored bar
+    # Add domains as colored segments
     for d in domains:
         fig.add_trace(go.Bar(
             x=[d["End"] - d["Start"] + 1],
-            y=[0.1], # Slightly offset from backbone
+            y=[0],
             base=d["Start"],
             orientation='h',
-            marker=dict(color=d["Color"]),
+            marker=dict(color=d["Color"], line=dict(color="white", width=1)),
             name=d["Domain Name"],
             hovertemplate=f"<b>{d['Domain Name']}</b><br>Pos: {d['Start']}-{d['End']}<br>{d['Function']}<extra></extra>"
         ))
 
     fig.update_layout(
-        title="Protein Domain Map (Linear Architecture)",
-        xaxis_title="Amino Acid Position",
+        title="Interactive Domain Architecture Map",
+        xaxis=dict(title="Amino Acid Position", range=[0, seq_length + 10]),
         yaxis=dict(showticklabels=False, range=[-1, 1]),
-        height=300,
+        height=250,
+        margin=dict(l=20, r=20, t=40, b=40),
         showlegend=True,
-        template="plotly_white",
-        barmode='overlay'
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        plot_bgcolor="white"
     )
     return fig
 
-# --- STREAMLIT INTERFACE ---
+# --- STREAMLIT UI ---
 st.set_page_config(page_title="Protein Profiler Pro", page_icon="🧬", layout="wide")
 
-st.title("🧬 Post-Translational Protein Analyzer")
-st.markdown("Analyze protein sequences for PTMs, conserved motifs, and **visual domain mapping**.")
+st.title("🧬 Protein Domain & PTM Mapper")
+st.markdown("Visualize the structural architecture and post-translational sites of your protein.")
 
-# Sidebar
-st.sidebar.header("Test Sequences")
-if st.sidebar.button("Load Human p53 (Partial)"):
+# Sidebar Examples
+st.sidebar.header("Examples")
+if st.sidebar.button("Load Human p53"):
     st.session_state.seq = "MEEPQSDPSVEPPLSQETFSDLWKLLPENNVLSPLPSQAMDDLMLSPDDI"
-if st.sidebar.button("Load Src Kinase Segment"):
+if st.sidebar.button("Load Src Kinase"):
     st.session_state.seq = "YVAPSDPLAGGVTTFVALYDYESRTETDLSFKKGERLQIVNNTEGDWWLAHSLSTGQTGYIPSNYVAPSD"
 
 # Input
-seq_input = st.text_area("Input Protein Sequence:", 
-                         value=st.session_state.get('seq', ''),
-                         placeholder="Paste amino acids here...")
-uni_input = st.text_input("OR Enter UniProt ID:", placeholder="e.g., P04637")
+seq_input = st.text_area("Paste Amino Acid Sequence:", value=st.session_state.get('seq', ''), height=150)
+uni_id = st.text_input("OR UniProt ID (e.g. P04637):")
 
-if st.button("Run Full Analysis", type="primary"):
-    sequence = seq_input.strip()
+if st.button("Generate Domain Map", type="primary"):
+    final_seq = seq_input.strip()
     
-    if uni_input and not sequence:
-        with st.spinner("Accessing UniProt Database..."):
-            try:
-                resp = requests.get(f"https://rest.uniprot.org/uniprotkb/{uni_input}.fasta")
-                if resp.status_code == 200:
-                    sequence = "".join(resp.text.split('\n')[1:])
-                else:
-                    st.error("UniProt ID not found.")
-            except:
-                st.error("UniProt API connection failed.")
-
-    if sequence:
-        result = analyze_sequence(sequence)
-        
-        if "error" in result:
-            st.error(result["error"])
-        else:
-            st.success(f"Analysis Complete: Protein Length = {result['length']} aa")
-            
-            # --- Visual Domain Mapping ---
-            st.subheader("🗺️ Sequence Domain Map")
-            if result["domains"]:
-                fig = plot_domain_map(result["domains"], result["length"])
-                st.plotly_chart(fig, use_container_width=True)
+    if uni_id and not final_seq:
+        with st.spinner("Fetching from UniProt..."):
+            r = requests.get(f"https://rest.uniprot.org/uniprotkb/{uni_id}.fasta")
+            if r.status_code == 200:
+                final_seq = "".join(r.text.split('\n')[1:])
             else:
-                st.info("No domains to map visually.")
+                st.error("UniProt ID not found.")
 
-            # --- Data Tables ---
-            col1, col2 = st.columns(2)
+    if final_seq:
+        res = analyze_sequence(final_seq)
+        if "error" in res:
+            st.error(res["error"])
+        else:
+            # 1. Visualization
+            st.subheader("📊 Domain Map")
+            if res["domains"]:
+                st.plotly_chart(draw_domain_map(res["domains"], res["length"]), use_container_width=True)
+            else:
+                st.warning("No known domains found in this sequence.")
+
+            # 2. Results Tables
+            c1, c2 = st.columns(2)
+            with c1:
+                st.subheader("📍 PTM Sites")
+                if res["ptms"]:
+                    st.dataframe(pd.DataFrame(res["ptms"]), use_container_width=True)
+                else:
+                    st.write("No common PTM sites found.")
             
-            with col1:
-                st.subheader("📍 Predicted PTM Sites")
-                if result["ptms"]:
-                    st.dataframe(pd.DataFrame(result["ptms"]), use_container_width=True, height=300)
+            with c2:
+                st.subheader("🏗️ Domain Details")
+                if res["domains"]:
+                    df_d = pd.DataFrame(res["domains"]).drop(columns=['Color'])
+                    st.dataframe(df_d, use_container_width=True)
                 else:
-                    st.info("No common PTM sites predicted.")
-
-            with col2:
-                st.subheader("🏗️ Identified Domains & Motifs")
-                if result["domains"]:
-                    df_domains = pd.DataFrame(result["domains"]).drop(columns=['Color'])
-                    st.dataframe(df_domains, use_container_width=True, height=300)
-                else:
-                    st.info("No functional domains identified.")
-
-            st.subheader("📝 Functional Summary")
-            st.info(result["summary"])
+                    st.write("No domains identified.")
     else:
-        st.warning("Please enter a sequence or ID to begin.")
+        st.info("Please enter a sequence to analyze.")
