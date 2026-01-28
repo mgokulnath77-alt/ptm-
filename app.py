@@ -2,7 +2,6 @@ import streamlit as st
 import re
 import requests
 import pandas as pd
-import plotly.graph_objects as go
 
 # --- BIOLOGICAL LOGIC & MOTIF DATABASE ---
 # Definitions for motifs with associated colors for the map
@@ -172,3 +171,4 @@ if st.button("Run Analysis", type="primary"):
                     st.write("No domains identified.")
     else:
         st.warning("Please provide a sequence or UniProt ID.")
+
